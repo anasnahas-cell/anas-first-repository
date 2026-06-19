@@ -22,8 +22,8 @@ const CONFIG = {
 // ============================================================
 // جلب Proxies من المصادر
 // ============================================================
-let workingProxy = null;
 let proxyList = [];
+let currentProxyIndex = 0;
 
 async function fetchProxiesFromSources() {
   for (const source of CONFIG.PROXY_SOURCES) {
@@ -52,6 +52,7 @@ async function refreshProxyList() {
   const newProxies = await fetchProxiesFromSources();
   if (newProxies.length > 0) {
     proxyList = newProxies;
+    currentProxyIndex = 0;
     console.log(`✅ تم تحديث قائمة الـ Proxies: ${proxyList.length} Proxy`);
   } else {
     console.log('⚠️ لم يتم جلب أي Proxy، سيتم استخدام القائمة السابقة إن وجدت');
@@ -59,83 +60,48 @@ async function refreshProxyList() {
 }
 
 // ============================================================
-// تجربة Proxy مع Binance
+// جلب البيانات مع Proxy (بدون اختبار مسبق)
 // ============================================================
-async function testProxy(proxyUrl) {
-  try {
-    const parsed = new URL(proxyUrl);
-    const config = {
-      timeout: 8000,
-      proxy: {
-        protocol: parsed.protocol.replace(':', ''),
-        host: parsed.hostname,
-        port: parseInt(parsed.port) || 80
-      }
-    };
-    const response = await axios.get('https://api.binance.com/api/v3/ping', config);
-    if (response.status === 200) {
-      return true;
-    }
-  } catch (error) {}
-  return false;
-}
-
-async function findWorkingProxy() {
-  // إذا كان هناك Proxy يعمل حالياً، نتأكد منه أولاً
-  if (workingProxy) {
-    console.log(`🔄 اختبار Proxy الحالي: ${workingProxy}`);
-    const working = await testProxy(workingProxy);
-    if (working) {
-      console.log(`✅ Proxy الحالي يعمل: ${workingProxy}`);
-      return workingProxy;
-    } else {
-      console.log(`❌ Proxy الحالي لم يعد يعمل: ${workingProxy}`);
-      workingProxy = null;
-    }
-  }
-
-  // إذا لم يكن هناك Proxy يعمل، نبحث عن واحد جديد
+async function fetchWithProxy(url) {
+  // إذا كانت القائمة فارغة، نجلب Proxies جديدة
   if (proxyList.length === 0) {
     await refreshProxyList();
   }
 
-  // نجرب Proxies من القائمة
-  for (const proxy of proxyList) {
-    console.log(`🔄 تجربة Proxy: ${proxy}`);
-    const working = await testProxy(proxy);
-    if (working) {
+  // نبدأ من آخر Proxy ناجح
+  let attempts = 0;
+  while (attempts < proxyList.length) {
+    const proxy = proxyList[currentProxyIndex % proxyList.length];
+    currentProxyIndex++;
+    attempts++;
+
+    try {
+      const parsed = new URL(proxy);
+      const config = {
+        timeout: 15000,
+        proxy: {
+          protocol: parsed.protocol.replace(':', ''),
+          host: parsed.hostname,
+          port: parseInt(parsed.port) || 80
+        }
+      };
+      const response = await axios.get(url, config);
       console.log(`✅ Proxy يعمل: ${proxy}`);
-      workingProxy = proxy;
-      return proxy;
+      return response.data;
+    } catch (error) {
+      console.log(`❌ Proxy ${proxy} فشل: ${error.message}`);
     }
   }
 
-  console.log('❌ لم يتم العثور على Proxy يعمل حالياً، سيتم المحاولة مرة أخرى لاحقاً');
-  return null;
+  // إذا فشلت جميع الـ Proxies، نجرب تحديث القائمة
+  console.log('🔄 جميع الـ Proxies فشلت، جاري تحديث القائمة...');
+  await refreshProxyList();
+  throw new Error('جميع الـ Proxies فشلت');
 }
 
 // ============================================================
-// دوال Binance API (مع Proxy متغير)
+// دوال Binance API
 // ============================================================
-async function fetchWithProxy(url) {
-  const proxy = await findWorkingProxy();
-  if (!proxy) {
-    throw new Error('لا يوجد Proxy يعمل حالياً');
-  }
-
-  const parsed = new URL(proxy);
-  const config = {
-    timeout: 15000,
-    proxy: {
-      protocol: parsed.protocol.replace(':', ''),
-      host: parsed.hostname,
-      port: parseInt(parsed.port) || 80
-    }
-  };
-  const response = await axios.get(url, config);
-  return response.data;
-}
-
 async function getTopSymbols() {
   try {
     const data = await fetchWithProxy('https://api.binance.com/api/v3/ticker/24hr');
@@ -152,7 +118,6 @@ async function getTopSymbols() {
       .map(t => t.symbol);
   } catch (error) {
     console.error('❌ فشل جلب العملات:', error.message);
-    workingProxy = null; // نعيد تعيين الـ Proxy ليجرب غيره في المرة القادمة
     return [];
   }
 }
@@ -312,7 +277,7 @@ server.listen(PORT, () => {
   console.log(`🌐 خادم HTTP يعمل على المنفذ ${PORT}`);
 });
 
-console.log('🤖 بدء تشغيل سكرينر العملات (مع جلب Proxies تلقائي)...');
+console.log('🤖 بدء تشغيل سكرينر العملات (مع جلب Proxies تلقائي)');
 console.log(`⏱️ الفحص كل 10 دقائق`);
 console.log(`📊 الإطار الزمني: ${CONFIG.TIMEFRAME}`);
 console.log(`🔍 البحث عن: E=1 و B=0`);
