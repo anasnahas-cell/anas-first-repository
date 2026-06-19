@@ -3,7 +3,7 @@ const cron = require('node-cron');
 const http = require('http');
 
 // ============================================================
-// الإعدادات الأساسية..
+// الإعدادات الأساسية...
 // ============================================================
 const CONFIG = {
   TELEGRAM_TOKEN: '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns',
