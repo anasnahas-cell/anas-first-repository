@@ -1,8 +1,10 @@
 const axios = require('axios');
 const cron = require('node-cron');
+const https = require('https');
+const http = require('http');
 
 // ============================================================
-// الإعدادات - تم التعديل مع التوكن الخاص بك
+// الإعدادات - ضع التوكن الخاص بك هنا
 // ============================================================
 const CONFIG = {
   TELEGRAM_TOKEN: '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns',   // ✅ توكنك
@@ -11,35 +13,62 @@ const CONFIG = {
   MAX_SYMBOLS: 300,                       // عدد العملات للفحص
   TIMEFRAME: '4h',                        // الإطار الزمني (15m, 1h, 4h, 1d)
   MAX_GAP: 4,                             // الحد الأقصى للفجوة بين E و B
+  // Proxy Settings
+  USE_PROXY: true,                        // ✅ تفعيل Proxy
+  PROXY_URL: 'http://185.199.229.156:7497',  // Proxy مجاني (قد يتغير)
 };
 
 // ============================================================
-// الحالة - لتتبع الإشارات المرسلة مسبقاً
+// إعداد Proxy Agent
 // ============================================================
-let sentSignals = new Set();
-
-// ============================================================
-// دوال مساعدة
-// ============================================================
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function getProxyAgent() {
+  if (!CONFIG.USE_PROXY) return null;
+  
+  const proxyUrl = new URL(CONFIG.PROXY_URL);
+  const isHttps = proxyUrl.protocol === 'https:';
+  
+  const agent = isHttps
+    ? new https.Agent({ rejectUnauthorized: false })
+    : new http.Agent();
+  
+  return {
+    protocol: proxyUrl.protocol.replace(':', ''),
+    host: proxyUrl.hostname,
+    port: parseInt(proxyUrl.port) || (isHttps ? 443 : 80),
+    agent: agent
+  };
 }
 
-function formatPrice(p) {
-  if (!p && p !== 0) return '-';
-  if (p >= 1000) return p.toFixed(2);
-  if (p >= 1) return p.toFixed(4);
-  if (p >= 0.01) return p.toFixed(6);
-  return p.toFixed(8);
+// ============================================================
+// دوال Binance API مع Proxy
+// ============================================================
+async function fetchWithProxy(url) {
+  try {
+    const proxyConfig = getProxyAgent();
+    const config = {
+      timeout: 15000, // 15 ثانية مهلة
+    };
+
+    if (proxyConfig) {
+      config.proxy = {
+        protocol: proxyConfig.protocol,
+        host: proxyConfig.host,
+        port: proxyConfig.port,
+      };
+    }
+
+    const response = await axios.get(url, config);
+    return response.data;
+  } catch (error) {
+    console.error(`❌ خطأ في جلب البيانات:`, error.message);
+    throw error;
+  }
 }
 
-// ============================================================
-// دوال Binance API
-// ============================================================
 async function getTopSymbols() {
   try {
-    const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr');
-    const usdt = response.data
+    const data = await fetchWithProxy('https://api.binance.com/api/v3/ticker/24hr');
+    const usdt = data
       .filter(t => 
         t.symbol.endsWith('USDT') && 
         !t.symbol.includes('DOWNUSDT') && 
@@ -59,26 +88,39 @@ async function getTopSymbols() {
 
 async function getKlines(symbol, limit = 30) {
   try {
-    const response = await axios.get('https://api.binance.com/api/v3/klines', {
-      params: {
-        symbol: symbol,
-        interval: CONFIG.TIMEFRAME,
-        limit: limit
-      }
-    });
-    return response.data.map(k => ({
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${CONFIG.TIMEFRAME}&limit=${limit}`;
+    const data = await fetchWithProxy(url);
+    return data.map(k => ({
       open: parseFloat(k[1]),
       high: parseFloat(k[2]),
       low: parseFloat(k[3]),
       close: parseFloat(k[4]),
     }));
   } catch (error) {
+    console.error(`❌ خطأ في جلب بيانات ${symbol}:`, error.message);
     return null;
   }
 }
 
 // ============================================================
-// خوارزمية الكشف عن النمط
+// باقي الكود (نفس الخوارزمية السابقة)
+// ============================================================
+let sentSignals = new Set();
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function formatPrice(p) {
+  if (!p && p !== 0) return '-';
+  if (p >= 1000) return p.toFixed(2);
+  if (p >= 1) return p.toFixed(4);
+  if (p >= 0.01) return p.toFixed(6);
+  return p.toFixed(8);
+}
+
+// ============================================================
+// خوارزمية الكشف عن النمط (نفسها)
 // ============================================================
 function detectPattern(candles) {
   const n = candles.length;
@@ -101,16 +143,9 @@ function detectPattern(candles) {
     const c1 = candles[i];
     const c2 = candles[i + 1];
     
-    // C1: شمعة حمراء (إغلاق أقل من افتتاح)
     if (c1.close >= c1.open) continue;
-    
-    // C2: شمعة خضراء (إغلاق أعلى من افتتاح)
     if (c2.close <= c2.open) continue;
-    
-    // C2 low < C1 low
     if (c2.low >= c1.low) continue;
-    
-    // C2 close > C1 high
     if (c2.close <= c1.high) continue;
     
     const age = (n - 1) - (i + 1);
@@ -127,7 +162,6 @@ function detectPattern(candles) {
   result.takeProfit = bestE.c2.close;
   result.stopLoss = bestE.c2.low;
 
-  // البحث عن B
   const c1High = bestE.c1.high;
   let bestB = null;
 
@@ -208,15 +242,12 @@ async function scan() {
         // التحقق من الشرطين: E=1 و B=0
         if (pat.hasE && pat.eAge === 1 && pat.hasB && pat.bAge === 0) {
           
-          // حساب النسب
           const pctFromBuy = ((currentPrice - pat.buyPrice) / pat.buyPrice) * 100;
           const tpPct = ((pat.takeProfit - pat.buyPrice) / pat.buyPrice) * 100;
           const slPct = ((pat.stopLoss - pat.buyPrice) / pat.buyPrice) * 100;
           
-          // المفتاح الفريد للعملية
           const signalKey = `${symbol}_${pat.eAge}_${pat.bAge}`;
           
-          // التحقق من عدم إرسال الإشارة مسبقاً
           if (!sentSignals.has(signalKey)) {
             sentSignals.add(signalKey);
             signalsFound++;
@@ -237,7 +268,6 @@ async function scan() {
         // تخطي العملات التي تسبب خطأ
       }
       
-      // تأخير بسيط لتجنب تجاوز حدود API
       if (i % 10 === 0) await sleep(100);
     }
     
@@ -254,7 +284,12 @@ async function scan() {
 console.log('🤖 بدء تشغيل سكرينر العملات مع تنبيهات تيليغرام...');
 console.log(`⏱️ سيتم الفحص كل 10 دقائق (${CONFIG.SCAN_INTERVAL})`);
 console.log(`📊 الإطار الزمني: ${CONFIG.TIMEFRAME}`);
-console.log(`🔍 البحث عن: E=1 و B=0\n`);
+console.log(`🔍 البحث عن: E=1 و B=0`);
+console.log(`🔄 استخدام Proxy: ${CONFIG.USE_PROXY ? 'نعم' : 'لا'}`);
+if (CONFIG.USE_PROXY) {
+  console.log(`🌐 عنوان الـ Proxy: ${CONFIG.PROXY_URL}`);
+}
+console.log('');
 
 // تنفيذ فحص أولي عند بدء التشغيل
 scan();
