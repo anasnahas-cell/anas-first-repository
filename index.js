@@ -3,7 +3,7 @@ const cron = require('node-cron');
 const http = require('http');
 
 // ============================================================
-// الإعدادات
+// الإعدادات - ضع التوكن الخاص بك هنا
 // ============================================================
 const CONFIG = {
   TELEGRAM_TOKEN: '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns',
@@ -13,16 +13,36 @@ const CONFIG = {
   TIMEFRAME: '4h',
   MAX_GAP: 4,
   PROXY_LIST: [
-    'http://51.158.99.220:8811',
-    'http://51.158.99.221:8811',
-    'http://51.158.99.222:8811',
-    'http://51.158.99.223:8811',
-    'http://51.158.99.224:8811',
-    'http://51.158.99.225:8811',
-    'http://51.158.99.226:8811',
-    'http://51.158.99.227:8811',
-    'http://51.158.99.228:8811',
-    'http://51.158.99.229:8811'
+    // Proxy 1-5
+    'http://103.152.112.120:80',
+    'http://103.174.188.170:80',
+    'http://103.175.162.130:80',
+    'http://103.189.244.26:80',
+    'http://103.216.50.126:80',
+    // Proxy 6-10
+    'http://103.216.50.43:80',
+    'http://103.216.50.53:80',
+    'http://103.216.50.66:80',
+    'http://103.216.50.87:80',
+    'http://103.216.51.8:80',
+    // Proxy 11-15
+    'http://103.216.51.18:80',
+    'http://103.216.51.28:80',
+    'http://103.216.51.38:80',
+    'http://103.216.51.48:80',
+    'http://103.216.51.58:80',
+    // Proxy 16-20
+    'http://103.216.51.68:80',
+    'http://103.216.51.78:80',
+    'http://103.216.51.88:80',
+    'http://103.216.51.98:80',
+    'http://103.216.52.10:80',
+    // Proxy 21-25
+    'http://103.216.52.20:80',
+    'http://103.216.52.30:80',
+    'http://103.216.52.40:80',
+    'http://103.216.52.50:80',
+    'http://103.216.52.60:80'
   ]
 };
 
@@ -47,6 +67,7 @@ async function fetchWithProxy(url, proxyUrl) {
 // جلب البيانات مع تجربة الـ Proxies
 // ============================================================
 async function fetchWithFallback(url) {
+  let lastError = null;
   for (const proxy of CONFIG.PROXY_LIST) {
     try {
       console.log(`🔄 تجربة Proxy: ${proxy}`);
@@ -55,9 +76,11 @@ async function fetchWithFallback(url) {
       return data;
     } catch (error) {
       console.log(`❌ Proxy ${proxy} فشل: ${error.message}`);
+      lastError = error;
     }
   }
-  throw new Error('❌ جميع الـ Proxies فشلت!');
+  console.log(`❌ جميع الـ ${CONFIG.PROXY_LIST.length} Proxies فشلت!`);
+  throw new Error(`❌ جميع الـ Proxies فشلت! آخر خطأ: ${lastError?.message}`);
 }
 
 // ============================================================
