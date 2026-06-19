@@ -3,7 +3,7 @@ const cron = require('node-cron');
 const http = require('http');
 
 // ============================================================
-// الإعدادات - ضع التوكن الخاص بك هنا
+// الإعدادات الأساسية
 // ============================================================
 const CONFIG = {
   TELEGRAM_TOKEN: '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns',
@@ -12,47 +12,120 @@ const CONFIG = {
   MAX_SYMBOLS: 300,
   TIMEFRAME: '4h',
   MAX_GAP: 4,
-  PROXY_LIST: [
-    // Proxy 1-5
-    'http://103.152.112.120:80',
-    'http://103.174.188.170:80',
-    'http://103.175.162.130:80',
-    'http://103.189.244.26:80',
-    'http://103.216.50.126:80',
-    // Proxy 6-10
-    'http://103.216.50.43:80',
-    'http://103.216.50.53:80',
-    'http://103.216.50.66:80',
-    'http://103.216.50.87:80',
-    'http://103.216.51.8:80',
-    // Proxy 11-15
-    'http://103.216.51.18:80',
-    'http://103.216.51.28:80',
-    'http://103.216.51.38:80',
-    'http://103.216.51.48:80',
-    'http://103.216.51.58:80',
-    // Proxy 16-20
-    'http://103.216.51.68:80',
-    'http://103.216.51.78:80',
-    'http://103.216.51.88:80',
-    'http://103.216.51.98:80',
-    'http://103.216.52.10:80',
-    // Proxy 21-25
-    'http://103.216.52.20:80',
-    'http://103.216.52.30:80',
-    'http://103.216.52.40:80',
-    'http://103.216.52.50:80',
-    'http://103.216.52.60:80'
+  PROXY_SOURCES: [
+    'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all',
+    'https://www.proxy-list.download/api/v1/get?type=http',
+    'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt'
   ]
 };
 
 // ============================================================
-// دوال مساعدة للـ Proxy
+// جلب Proxies من المصادر
 // ============================================================
-async function fetchWithProxy(url, proxyUrl) {
-  const parsed = new URL(proxyUrl);
+let workingProxy = null;
+let proxyList = [];
+
+async function fetchProxiesFromSources() {
+  for (const source of CONFIG.PROXY_SOURCES) {
+    try {
+      console.log(`🌐 جلب Proxies من: ${source}`);
+      const response = await axios.get(source, { timeout: 15000 });
+      const lines = response.data.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+      const proxies = lines.map(line => {
+        const parts = line.trim().split(':');
+        if (parts.length === 2) return `http://${parts[0]}:${parts[1]}`;
+        return null;
+      }).filter(p => p);
+      if (proxies.length > 0) {
+        console.log(`✅ تم جلب ${proxies.length} Proxy من ${source}`);
+        return proxies;
+      }
+    } catch (error) {
+      console.log(`❌ فشل جلب Proxies من ${source}: ${error.message}`);
+    }
+  }
+  return [];
+}
+
+async function refreshProxyList() {
+  console.log('🔄 جلب قائمة جديدة من الـ Proxies...');
+  const newProxies = await fetchProxiesFromSources();
+  if (newProxies.length > 0) {
+    proxyList = newProxies;
+    console.log(`✅ تم تحديث قائمة الـ Proxies: ${proxyList.length} Proxy`);
+  } else {
+    console.log('⚠️ لم يتم جلب أي Proxy، سيتم استخدام القائمة السابقة إن وجدت');
+  }
+}
+
+// ============================================================
+// تجربة Proxy مع Binance
+// ============================================================
+async function testProxy(proxyUrl) {
+  try {
+    const parsed = new URL(proxyUrl);
+    const config = {
+      timeout: 8000,
+      proxy: {
+        protocol: parsed.protocol.replace(':', ''),
+        host: parsed.hostname,
+        port: parseInt(parsed.port) || 80
+      }
+    };
+    const response = await axios.get('https://api.binance.com/api/v3/ping', config);
+    if (response.status === 200) {
+      return true;
+    }
+  } catch (error) {}
+  return false;
+}
+
+async function findWorkingProxy() {
+  // إذا كان هناك Proxy يعمل حالياً، نتأكد منه أولاً
+  if (workingProxy) {
+    console.log(`🔄 اختبار Proxy الحالي: ${workingProxy}`);
+    const working = await testProxy(workingProxy);
+    if (working) {
+      console.log(`✅ Proxy الحالي يعمل: ${workingProxy}`);
+      return workingProxy;
+    } else {
+      console.log(`❌ Proxy الحالي لم يعد يعمل: ${workingProxy}`);
+      workingProxy = null;
+    }
+  }
+
+  // إذا لم يكن هناك Proxy يعمل، نبحث عن واحد جديد
+  if (proxyList.length === 0) {
+    await refreshProxyList();
+  }
+
+  // نجرب Proxies من القائمة
+  for (const proxy of proxyList) {
+    console.log(`🔄 تجربة Proxy: ${proxy}`);
+    const working = await testProxy(proxy);
+    if (working) {
+      console.log(`✅ Proxy يعمل: ${proxy}`);
+      workingProxy = proxy;
+      return proxy;
+    }
+  }
+
+  console.log('❌ لم يتم العثور على Proxy يعمل حالياً، سيتم المحاولة مرة أخرى لاحقاً');
+  return null;
+}
+
+// ============================================================
+// دوال Binance API (مع Proxy متغير)
+// ============================================================
+async function fetchWithProxy(url) {
+  const proxy = await findWorkingProxy();
+  if (!proxy) {
+    throw new Error('لا يوجد Proxy يعمل حالياً');
+  }
+
+  const parsed = new URL(proxy);
   const config = {
-    timeout: 10000,
+    timeout: 15000,
     proxy: {
       protocol: parsed.protocol.replace(':', ''),
       host: parsed.hostname,
@@ -63,32 +136,9 @@ async function fetchWithProxy(url, proxyUrl) {
   return response.data;
 }
 
-// ============================================================
-// جلب البيانات مع تجربة الـ Proxies
-// ============================================================
-async function fetchWithFallback(url) {
-  let lastError = null;
-  for (const proxy of CONFIG.PROXY_LIST) {
-    try {
-      console.log(`🔄 تجربة Proxy: ${proxy}`);
-      const data = await fetchWithProxy(url, proxy);
-      console.log(`✅ Proxy ${proxy} يعمل!`);
-      return data;
-    } catch (error) {
-      console.log(`❌ Proxy ${proxy} فشل: ${error.message}`);
-      lastError = error;
-    }
-  }
-  console.log(`❌ جميع الـ ${CONFIG.PROXY_LIST.length} Proxies فشلت!`);
-  throw new Error(`❌ جميع الـ Proxies فشلت! آخر خطأ: ${lastError?.message}`);
-}
-
-// ============================================================
-// دوال Binance API
-// ============================================================
 async function getTopSymbols() {
   try {
-    const data = await fetchWithFallback('https://api.binance.com/api/v3/ticker/24hr');
+    const data = await fetchWithProxy('https://api.binance.com/api/v3/ticker/24hr');
     return data
       .filter(t => 
         t.symbol.endsWith('USDT') && 
@@ -102,6 +152,7 @@ async function getTopSymbols() {
       .map(t => t.symbol);
   } catch (error) {
     console.error('❌ فشل جلب العملات:', error.message);
+    workingProxy = null; // نعيد تعيين الـ Proxy ليجرب غيره في المرة القادمة
     return [];
   }
 }
@@ -109,7 +160,7 @@ async function getTopSymbols() {
 async function getKlines(symbol, limit = 30) {
   try {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${CONFIG.TIMEFRAME}&limit=${limit}`;
-    const data = await fetchWithFallback(url);
+    const data = await fetchWithProxy(url);
     return data.map(k => ({
       open: parseFloat(k[1]),
       high: parseFloat(k[2]),
@@ -261,15 +312,27 @@ server.listen(PORT, () => {
   console.log(`🌐 خادم HTTP يعمل على المنفذ ${PORT}`);
 });
 
-console.log('🤖 بدء تشغيل سكرينر العملات...');
+console.log('🤖 بدء تشغيل سكرينر العملات (مع جلب Proxies تلقائي)...');
 console.log(`⏱️ الفحص كل 10 دقائق`);
 console.log(`📊 الإطار الزمني: ${CONFIG.TIMEFRAME}`);
 console.log(`🔍 البحث عن: E=1 و B=0`);
-console.log(`🔁 عدد Proxies: ${CONFIG.PROXY_LIST.length}`);
+console.log(`🌐 سيتم جلب Proxies من 3 مصادر مختلفة`);
 console.log('');
 
-scan();
-cron.schedule(CONFIG.SCAN_INTERVAL, () => scan());
+// جلب Proxies أول مرة
+refreshProxyList().then(() => {
+  scan();
+});
+
+// جدولة الفحص
+cron.schedule(CONFIG.SCAN_INTERVAL, () => {
+  scan();
+});
+
+// تجديد قائمة الـ Proxies كل ساعة
+cron.schedule('0 * * * *', () => {
+  refreshProxyList();
+});
 
 process.on('SIGINT', () => {
   console.log('\n👋 تم إيقاف التشغيل');
