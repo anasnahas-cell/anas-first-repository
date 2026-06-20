@@ -5,27 +5,27 @@ const TELEGRAM_TOKEN = '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns';
 const TELEGRAM_CHAT_ID = '656032699';
 
 // ============================================================
-// CoinGecko API (بدون Proxies)
+// CoinCap API (بدون 429، بدون Proxies)
 // ============================================================
 const fetch = require('node-fetch');
 
 async function getTopCoins(limit = 50) {
   try {
-    console.log('📊 جلب العملات من CoinGecko...');
+    console.log('📊 جلب العملات من CoinCap...');
     const r = await fetch(
-      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=${limit}&page=1&sparkline=false`
+      `https://api.coincap.io/v2/assets?limit=${limit}&sort=volumeUsd&order=desc`
     );
     if (!r.ok) {
-      console.error(`❌ خطأ CoinGecko: ${r.status}`);
+      console.error(`❌ خطأ CoinCap: ${r.status}`);
       return [];
     }
     const data = await r.json();
-    console.log(`✅ تم جلب ${data.length} عملة من CoinGecko`);
-    return data.map(coin => ({
+    console.log(`✅ تم جلب ${data.data.length} عملة من CoinCap`);
+    return data.data.map(coin => ({
       id: coin.id,
-      symbol: coin.symbol.toUpperCase() + 'USDT',
+      symbol: coin.symbol + 'USDT',
       name: coin.name,
-      price: coin.current_price,
+      price: parseFloat(coin.priceUsd),
     }));
   } catch (error) {
     console.error('❌ خطأ في جلب العملات:', error.message);
@@ -35,24 +35,20 @@ async function getTopCoins(limit = 50) {
 
 async function getCandles(coinId, limit = 3) {
   try {
-    const days = Math.max(limit, 5);
     const r = await fetch(
-      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`
+      `https://api.coincap.io/v2/assets/${coinId}/history?interval=h1&limit=${limit}`
     );
     if (!r.ok) return null;
     const data = await r.json();
-    if (!data.prices || data.prices.length < limit) return null;
+    if (!data.data || data.data.length < limit) return null;
 
-    const prices = data.prices;
-    const step = Math.floor(prices.length / limit);
+    const prices = data.data.map(p => parseFloat(p.priceUsd));
     const candles = [];
-    let lastPrice = prices[0]?.[1] || 100;
+    let lastPrice = prices[0] || 100;
 
-    for (let i = 0; i < limit; i++) {
-      const idx = i * step;
-      const idx2 = Math.min(idx + step, prices.length - 1);
+    for (let i = 0; i < prices.length; i++) {
       const open = lastPrice;
-      const close = prices[idx2]?.[1] || open;
+      const close = prices[i];
       const high = Math.max(open, close) * (1 + Math.random() * 0.01);
       const low = Math.min(open, close) * (1 - Math.random() * 0.01);
       
@@ -67,7 +63,7 @@ async function getCandles(coinId, limit = 3) {
 }
 
 // ============================================================
-// منطق اكتشاف النمط
+// منطق اكتشاف النمط (نفسه)
 // ============================================================
 function detectPattern(candles, maxGap = 4) {
   const n = candles.length;
@@ -146,11 +142,11 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
 }
 
 // ============================================================
-// الفحص الرئيسي (50 عملة، 3 شمعات، تأخير 1 ثانية)
+// الفحص الرئيسي
 // ============================================================
 async function mainScan() {
   console.log(`🔄 بدء الفحص - ${new Date().toLocaleString()}`);
-  console.log('📡 باستخدام CoinGecko API (50 عملة، 3 شمعات، تأخير 1 ثانية)');
+  console.log('📡 باستخدام CoinCap API (بدون 429)');
   
   const coins = await getTopCoins(50);
   if (coins.length === 0) {
@@ -183,8 +179,7 @@ async function mainScan() {
       // نتجاوز الأخطاء
     }
     
-    // ✅ تأخير 1 ثانية بين الطلبات (آمان تام)
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 500));
   }
   
   console.log(`✅ اكتمل الفحص. تم العثور على ${alerts} إشارة.`);
