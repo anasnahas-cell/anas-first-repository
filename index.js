@@ -9,7 +9,7 @@ const TELEGRAM_CHAT_ID = '656032699';
 // ============================================================
 const fetch = require('node-fetch');
 
-async function getTopCoins(limit = 100) {
+async function getTopCoins(limit = 50) {
   try {
     console.log('📊 جلب العملات من CoinGecko...');
     const r = await fetch(
@@ -33,9 +33,9 @@ async function getTopCoins(limit = 100) {
   }
 }
 
-async function getCandles(coinId, limit = 6) {
+async function getCandles(coinId, limit = 3) {
   try {
-    const days = Math.max(limit, 7);
+    const days = Math.max(limit, 5);
     const r = await fetch(
       `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`
     );
@@ -146,13 +146,13 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
 }
 
 // ============================================================
-// الفحص الرئيسي
+// الفحص الرئيسي (50 عملة، 3 شمعات، تأخير 1 ثانية)
 // ============================================================
 async function mainScan() {
   console.log(`🔄 بدء الفحص - ${new Date().toLocaleString()}`);
-  console.log('📡 باستخدام CoinGecko API (بدون Proxies)');
+  console.log('📡 باستخدام CoinGecko API (50 عملة، 3 شمعات، تأخير 1 ثانية)');
   
-  const coins = await getTopCoins(100);
+  const coins = await getTopCoins(50);
   if (coins.length === 0) {
     console.error('❌ لا توجد عملات للفحص');
     return;
@@ -163,8 +163,8 @@ async function mainScan() {
   for (let i = 0; i < coins.length; i++) {
     const coin = coins[i];
     try {
-      const candles = await getCandles(coin.id, 6);
-      if (!candles || candles.length < 5) continue;
+      const candles = await getCandles(coin.id, 3);
+      if (!candles || candles.length < 3) continue;
       
       const result = detectPattern(candles, 4);
       if (!result.hasE) continue;
@@ -183,7 +183,8 @@ async function mainScan() {
       // نتجاوز الأخطاء
     }
     
-    await new Promise(r => setTimeout(r, 500));
+    // ✅ تأخير 1 ثانية بين الطلبات (آمان تام)
+    await new Promise(r => setTimeout(r, 1000));
   }
   
   console.log(`✅ اكتمل الفحص. تم العثور على ${alerts} إشارة.`);
