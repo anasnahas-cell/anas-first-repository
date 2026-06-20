@@ -1,7 +1,7 @@
 {
   "name": "crypto-scanner-gecko",
   "version": "1.0.0",
-  "description": "Crypto Scanner with CoinGecko API (No Proxies)",
+  "description": "Crypto Scanner with CoinGecko API (50 coins, 3 candles, 1s delay)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
