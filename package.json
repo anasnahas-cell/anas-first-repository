@@ -1,7 +1,7 @@
 {
   "name": "crypto-scanner-gecko",
   "version": "1.0.0",
-  "description": "Crypto Scanner with CoinGecko API (100 coins, safe limits)",
+  "description": "Crypto Scanner with CoinGecko API (No Proxies)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
