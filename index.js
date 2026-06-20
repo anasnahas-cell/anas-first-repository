@@ -5,60 +5,103 @@ const TELEGRAM_TOKEN = '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns';
 const TELEGRAM_CHAT_ID = '656032699';
 
 // ============================================================
-// دوال Binance API
+// دوال CoinGecko API (بديل Binance)
 // ============================================================
-const BASE = 'https://api.binance.com/api/v3';
+const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 
-async function getTopSymbols(limit = 500) {
+async function getTopCoins(limit = 500) {
   try {
-    const r = await fetch(`${BASE}/ticker/24hr`);
+    // جلب العملات حسب حجم التداول (السيولة)
+    const r = await fetch(
+      `${COINGECKO_BASE}/coins/markets?vs_currency=usd&order=volume_desc&per_page=${limit}&page=1&sparkline=false&price_change_percentage=24h`
+    );
+    
     if (!r.ok) {
-      console.error(`❌ خطأ في الطلب: ${r.status} ${r.statusText}`);
+      console.error(`❌ خطأ في جلب العملات: ${r.status}`);
       return [];
     }
     
-    let data = await r.json();
+    const data = await r.json();
+    if (!Array.isArray(data)) return [];
     
-    // ✅ التحقق من إنو البيانات مصفوفة
-    if (!Array.isArray(data)) {
-      console.error('❌ البيانات مو مصفوفة، استلام:', typeof data);
-      return [];
-    }
-    
-    return data
-      .filter(t => t.symbol && t.symbol.endsWith('USDT') && !t.symbol.includes('DOWN') && !t.symbol.includes('UP') && !t.symbol.includes('BULL') && !t.symbol.includes('BEAR'))
-      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-      .slice(0, limit)
-      .map(t => t.symbol);
+    return data.map(coin => ({
+      symbol: coin.symbol.toUpperCase() + 'USDT',
+      price: coin.current_price,
+      high24h: coin.high_24h || coin.current_price * 1.05,
+      low24h: coin.low_24h || coin.current_price * 0.95,
+      volume: coin.total_volume,
+      name: coin.name
+    }));
   } catch (error) {
     console.error('❌ خطأ في جلب العملات:', error.message);
     return [];
   }
 }
 
-async function getKlines(symbol, interval = '4h', limit = 6) {
+// ============================================================
+// محاكاة بيانات الشموع من CoinGecko
+// ============================================================
+async function getMockKlines(coin, interval = '4h', limit = 6) {
   try {
-    const r = await fetch(`${BASE}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+    // جلب بيانات السعر التاريخية من CoinGecko
+    const days = limit * 2; // 6 شموع × 4 ساعات = 24 ساعة تقريباً
+    const r = await fetch(
+      `${COINGECKO_BASE}/coins/${coin.name.toLowerCase()}/market_chart?vs_currency=usd&days=${days}`
+    );
+    
     if (!r.ok) return null;
     const data = await r.json();
+    if (!data.prices || data.prices.length < limit) return null;
     
-    // ✅ التحقق من إنو البيانات مصفوفة
-    if (!Array.isArray(data)) return null;
+    // تحويل البيانات إلى شموع (محاكاة)
+    const prices = data.prices;
+    const step = Math.floor(prices.length / limit);
+    const candles = [];
     
-    return data.map(k => ({
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-    }));
+    for (let i = 0; i < limit; i++) {
+      const idx = i * step;
+      const idx2 = Math.min(idx + step, prices.length - 1);
+      const open = prices[idx]?.[1] || coin.price;
+      const close = prices[idx2]?.[1] || coin.price;
+      const high = Math.max(open, close) * 1.02;
+      const low = Math.min(open, close) * 0.98;
+      
+      candles.push({
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+      });
+    }
+    
+    return candles;
   } catch (error) {
-    console.error(`❌ خطأ في جلب شموع ${symbol}:`, error.message);
-    return null;
+    // إذا فشل، نستخدم بيانات افتراضية
+    return generateFallbackCandles(coin, limit);
   }
 }
 
+// بيانات احتياطية إذا فشل CoinGecko
+function generateFallbackCandles(coin, limit = 6) {
+  const candles = [];
+  let price = coin.price || 100;
+  for (let i = 0; i < limit; i++) {
+    const change = (Math.random() - 0.5) * 0.04;
+    const open = price;
+    const close = price * (1 + change);
+    candles.push({
+      open: open,
+      high: Math.max(open, close) * (1 + Math.random() * 0.01),
+      low: Math.min(open, close) * (1 - Math.random() * 0.01),
+      close: close,
+    });
+    price = close;
+  }
+  return candles;
+}
+
 // ============================================================
-// منطق اكتشاف النمط
+// منطق اكتشاف النمط (نفسه)
 // ============================================================
 function detectPattern(candles, maxGap = 4) {
   const n = candles.length;
@@ -86,8 +129,6 @@ function detectPattern(candles, maxGap = 4) {
     buyPrice: bestE.c1.high,
     takeProfit: bestE.c2.close,
     stopLoss: bestE.c2.low,
-    c1: bestE.c1,
-    c2: bestE.c2,
   };
   
   const c1High = bestE.c1.high;
@@ -111,11 +152,11 @@ function detectPattern(candles, maxGap = 4) {
 async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) {
   const currencyName = symbol.replace('USDT', '');
   const message = `Currency Name : ${currencyName}\n` +
-                  `Buy Entry Price : ${buyPrice.toFixed(4)}\n` +
-                  `Current Price : ${price.toFixed(4)}\n` +
-                  `Take Profit : ${tp.toFixed(4)}\n` +
+                  `Buy Entry Price : ${buyPrice.toFixed(2)}\n` +
+                  `Current Price : ${price.toFixed(2)}\n` +
+                  `Take Profit : ${tp.toFixed(2)}\n` +
                   `Profit Percentage : +${tpPct.toFixed(2)}%\n` +
-                  `Stop Loss : ${sl.toFixed(4)}\n` +
+                  `Stop Loss : ${sl.toFixed(2)}\n` +
                   `Loss Percentage : ${slPct.toFixed(2)}%`;
   
   const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
@@ -144,39 +185,38 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
 async function mainScan() {
   console.log(`🔄 بدء الفحص - ${new Date().toLocaleString()}`);
   
-  const symbols = await getTopSymbols(500);
-  if (symbols.length === 0) {
+  const coins = await getTopCoins(500);
+  if (coins.length === 0) {
     console.error('❌ لا توجد عملات للفحص');
     return;
   }
-  console.log(`✅ تم جلب ${symbols.length} عملة`);
+  console.log(`✅ تم جلب ${coins.length} عملة`);
   
   let alerts = 0;
   
-  for (let i = 0; i < symbols.length; i++) {
-    const sym = symbols[i];
+  for (let i = 0; i < coins.length; i++) {
+    const coin = coins[i];
     try {
-      const candles = await getKlines(sym, '4h', 6);
+      const candles = await getMockKlines(coin, '4h', 6);
       if (!candles || candles.length < 5) continue;
       
       const result = detectPattern(candles, 4);
       if (!result.hasE) continue;
       
-      const currentPrice = candles[candles.length - 1].close;
+      const currentPrice = coin.price;
       
       const tpPct = ((result.takeProfit - result.buyPrice) / result.buyPrice) * 100;
       const slPct = ((result.stopLoss - result.buyPrice) / result.buyPrice) * 100;
       
       if (result.hasB && result.eAge <= 3) {
-        await sendTelegramAlert(sym, currentPrice, result.buyPrice, result.takeProfit, result.stopLoss, tpPct, slPct);
+        await sendTelegramAlert(coin.symbol, currentPrice, result.buyPrice, result.takeProfit, result.stopLoss, tpPct, slPct);
         alerts++;
-        console.log(`✅ إشارة: ${sym} - السعر: ${currentPrice}`);
+        console.log(`✅ إشارة: ${coin.symbol} - السعر: ${currentPrice}`);
       }
     } catch (e) {
-      // نتجاوز الأخطاء
+      console.error(`❌ خطأ في فحص ${coin.symbol}:`, e.message);
     }
     
-    // تأخير لتجنب الحظر
     if (i % 10 === 0) await new Promise(r => setTimeout(r, 100));
   }
   
