@@ -5,13 +5,13 @@ const TELEGRAM_TOKEN = '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns';
 const TELEGRAM_CHAT_ID = '656032699';
 
 // ============================================================
-// دوال CoinGecko API (100 عملة فقط)
+// CoinGecko API (بدون Proxies)
 // ============================================================
 const fetch = require('node-fetch');
 
 async function getTopCoins(limit = 100) {
   try {
-    console.log('📊 جلب 100 عملة من CoinGecko...');
+    console.log('📊 جلب العملات من CoinGecko...');
     const r = await fetch(
       `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=${limit}&page=1&sparkline=false`
     );
@@ -20,15 +20,12 @@ async function getTopCoins(limit = 100) {
       return [];
     }
     const data = await r.json();
-    console.log(`✅ تم جلب ${data.length} عملة`);
+    console.log(`✅ تم جلب ${data.length} عملة من CoinGecko`);
     return data.map(coin => ({
       id: coin.id,
       symbol: coin.symbol.toUpperCase() + 'USDT',
       name: coin.name,
       price: coin.current_price,
-      high24h: coin.high_24h || coin.current_price * 1.05,
-      low24h: coin.low_24h || coin.current_price * 0.95,
-      volume: coin.total_volume
     }));
   } catch (error) {
     console.error('❌ خطأ في جلب العملات:', error.message);
@@ -36,9 +33,6 @@ async function getTopCoins(limit = 100) {
   }
 }
 
-// ============================================================
-// جلب بيانات الشموع من CoinGecko (محاكاة)
-// ============================================================
 async function getCandles(coinId, limit = 6) {
   try {
     const days = Math.max(limit, 7);
@@ -73,7 +67,7 @@ async function getCandles(coinId, limit = 6) {
 }
 
 // ============================================================
-// منطق اكتشاف النمط (نفسه)
+// منطق اكتشاف النمط
 // ============================================================
 function detectPattern(candles, maxGap = 4) {
   const n = candles.length;
@@ -152,11 +146,11 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
 }
 
 // ============================================================
-// الفحص الرئيسي (100 عملة فقط)
+// الفحص الرئيسي
 // ============================================================
 async function mainScan() {
   console.log(`🔄 بدء الفحص - ${new Date().toLocaleString()}`);
-  console.log('📡 باستخدام CoinGecko API (100 عملة، مع تأخير آمن)');
+  console.log('📡 باستخدام CoinGecko API (بدون Proxies)');
   
   const coins = await getTopCoins(100);
   if (coins.length === 0) {
@@ -189,7 +183,6 @@ async function mainScan() {
       // نتجاوز الأخطاء
     }
     
-    // ✅ تأخير 500ms بين كل طلب (آمن جداً)
     await new Promise(r => setTimeout(r, 500));
   }
   
