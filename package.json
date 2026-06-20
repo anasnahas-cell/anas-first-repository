@@ -1,13 +1,12 @@
 {
-  "name": "crypto-scanner-bot",
+  "name": "crypto-scanner",
   "version": "1.0.0",
-  "description": "Crypto pattern scanner with Telegram alerts",
+  "description": "Binance Pattern Scanner with Telegram Alerts",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "node-cron": "^3.0.2"
+    "node-fetch": "^2.6.7"
   }
 }
