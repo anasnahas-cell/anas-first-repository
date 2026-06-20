@@ -1,12 +1,12 @@
 {
-  "name": "crypto-scanner-bybit",
+  "name": "crypto-scanner-gecko",
   "version": "1.0.0",
-  "description": "Crypto Scanner with Bybit (No Geo-Blocking)",
+  "description": "Crypto Scanner with CoinGecko API (No Geo-Blocking)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "ccxt": "^4.2.0"
+    "node-fetch": "^2.6.7"
   }
 }
