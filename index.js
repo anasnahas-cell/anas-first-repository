@@ -10,25 +10,51 @@ const TELEGRAM_CHAT_ID = '656032699';
 const BASE = 'https://api.binance.com/api/v3';
 
 async function getTopSymbols(limit = 500) {
-  const r = await fetch(`${BASE}/ticker/24hr`);
-  const data = await r.json();
-  return data
-    .filter(t => t.symbol.endsWith('USDT') && !t.symbol.includes('DOWN') && !t.symbol.includes('UP') && !t.symbol.includes('BULL') && !t.symbol.includes('BEAR'))
-    .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-    .slice(0, limit)
-    .map(t => t.symbol);
+  try {
+    const r = await fetch(`${BASE}/ticker/24hr`);
+    if (!r.ok) {
+      console.error(`❌ خطأ في الطلب: ${r.status} ${r.statusText}`);
+      return [];
+    }
+    
+    let data = await r.json();
+    
+    // ✅ التحقق من إنو البيانات مصفوفة
+    if (!Array.isArray(data)) {
+      console.error('❌ البيانات مو مصفوفة، استلام:', typeof data);
+      return [];
+    }
+    
+    return data
+      .filter(t => t.symbol && t.symbol.endsWith('USDT') && !t.symbol.includes('DOWN') && !t.symbol.includes('UP') && !t.symbol.includes('BULL') && !t.symbol.includes('BEAR'))
+      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+      .slice(0, limit)
+      .map(t => t.symbol);
+  } catch (error) {
+    console.error('❌ خطأ في جلب العملات:', error.message);
+    return [];
+  }
 }
 
 async function getKlines(symbol, interval = '4h', limit = 6) {
-  const r = await fetch(`${BASE}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
-  if (!r.ok) return null;
-  const data = await r.json();
-  return data.map(k => ({
-    open: parseFloat(k[1]),
-    high: parseFloat(k[2]),
-    low: parseFloat(k[3]),
-    close: parseFloat(k[4]),
-  }));
+  try {
+    const r = await fetch(`${BASE}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    
+    // ✅ التحقق من إنو البيانات مصفوفة
+    if (!Array.isArray(data)) return null;
+    
+    return data.map(k => ({
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+    }));
+  } catch (error) {
+    console.error(`❌ خطأ في جلب شموع ${symbol}:`, error.message);
+    return null;
+  }
 }
 
 // ============================================================
@@ -94,7 +120,7 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
   
   const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -102,7 +128,11 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
         text: message
       })
     });
-    console.log(`✅ تم إرسال تنبيه لـ ${symbol}`);
+    if (response.ok) {
+      console.log(`✅ تم إرسال تنبيه لـ ${symbol}`);
+    } else {
+      console.error(`❌ فشل إرسال تنبيه لـ ${symbol}: ${response.status}`);
+    }
   } catch (error) {
     console.error(`❌ فشل إرسال تنبيه لـ ${symbol}:`, error.message);
   }
@@ -115,13 +145,19 @@ async function mainScan() {
   console.log(`🔄 بدء الفحص - ${new Date().toLocaleString()}`);
   
   const symbols = await getTopSymbols(500);
+  if (symbols.length === 0) {
+    console.error('❌ لا توجد عملات للفحص');
+    return;
+  }
+  console.log(`✅ تم جلب ${symbols.length} عملة`);
+  
   let alerts = 0;
   
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
     try {
       const candles = await getKlines(sym, '4h', 6);
-      if (!candles) continue;
+      if (!candles || candles.length < 5) continue;
       
       const result = detectPattern(candles, 4);
       if (!result.hasE) continue;
@@ -140,6 +176,7 @@ async function mainScan() {
       // نتجاوز الأخطاء
     }
     
+    // تأخير لتجنب الحظر
     if (i % 10 === 0) await new Promise(r => setTimeout(r, 100));
   }
   
