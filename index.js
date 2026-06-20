@@ -5,13 +5,13 @@ const TELEGRAM_TOKEN = '8655790784:AAFpiIu5mX3Je3jhMJ68Sih8iIfMsflpbns';
 const TELEGRAM_CHAT_ID = '656032699';
 
 // ============================================================
-// دوال CoinGecko API
+// دوال CoinGecko API (100 عملة فقط)
 // ============================================================
 const fetch = require('node-fetch');
 
-async function getTopCoins(limit = 200) {
+async function getTopCoins(limit = 100) {
   try {
-    console.log('📊 جلب العملات من CoinGecko...');
+    console.log('📊 جلب 100 عملة من CoinGecko...');
     const r = await fetch(
       `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=${limit}&page=1&sparkline=false`
     );
@@ -20,6 +20,7 @@ async function getTopCoins(limit = 200) {
       return [];
     }
     const data = await r.json();
+    console.log(`✅ تم جلب ${data.length} عملة`);
     return data.map(coin => ({
       id: coin.id,
       symbol: coin.symbol.toUpperCase() + 'USDT',
@@ -151,18 +152,17 @@ async function sendTelegramAlert(symbol, price, buyPrice, tp, sl, tpPct, slPct) 
 }
 
 // ============================================================
-// الفحص الرئيسي
+// الفحص الرئيسي (100 عملة فقط)
 // ============================================================
 async function mainScan() {
   console.log(`🔄 بدء الفحص - ${new Date().toLocaleString()}`);
-  console.log('📡 باستخدام CoinGecko API (بدون حظر جغرافي)');
+  console.log('📡 باستخدام CoinGecko API (100 عملة، مع تأخير آمن)');
   
-  const coins = await getTopCoins(200);
+  const coins = await getTopCoins(100);
   if (coins.length === 0) {
     console.error('❌ لا توجد عملات للفحص');
     return;
   }
-  console.log(`✅ تم جلب ${coins.length} عملة`);
   
   let alerts = 0;
   
@@ -189,7 +189,8 @@ async function mainScan() {
       // نتجاوز الأخطاء
     }
     
-    if (i % 10 === 0) await new Promise(r => setTimeout(r, 100));
+    // ✅ تأخير 500ms بين كل طلب (آمن جداً)
+    await new Promise(r => setTimeout(r, 500));
   }
   
   console.log(`✅ اكتمل الفحص. تم العثور على ${alerts} إشارة.`);
